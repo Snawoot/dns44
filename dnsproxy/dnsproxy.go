@@ -16,7 +16,7 @@ import (
 )
 
 // defaultTTL is the default TTL for the rewritten records.
-const defaultTTL = 60
+const defaultTTL = 900
 
 // DNSProxy is a struct that manages the DNS proxy server.  This server's
 // purpose is to redirect queries to a specified SNI proxy.
@@ -89,7 +89,7 @@ func (d *DNSProxy) rewrite(qName string, qType uint16, ctx *proxy.DNSContext) er
 	} else {
 		clientKey = clientAddrPort.Addr().String()
 	}
-	answerAddress, err := d.mapper.EnsureMapping(clientKey, domainName, defaultTTL+1*time.Second)
+	answerAddress, err := d.mapper.EnsureMapping(clientKey, domainName, (defaultTTL+1)*time.Second)
 	if err != nil {
 		return fmt.Errorf("mapping error: %w", err)
 	}
