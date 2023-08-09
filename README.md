@@ -1,2 +1,5 @@
 # dns44
-IPv4 to IPv4 mapping DNS server
+
+\[ DNS-four-to-four \]
+
+IPv4 to IPv4 mapping DNS server.
