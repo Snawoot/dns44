@@ -12,7 +12,7 @@ NDK_CC_ARM64 = $(abspath ../../ndk-toolchain-arm64/bin/aarch64-linux-android21-c
 GO := go
 GOIMPORTS := goimports
 
-src = $(wildcard *.go */*.go */*/*.go)
+src = $(wildcard *.go */*.go */*/*.go) go.mod go.sum
 
 native: bin-native
 all: bin-linux-amd64 bin-linux-386 bin-linux-arm bin-linux-arm64 \
