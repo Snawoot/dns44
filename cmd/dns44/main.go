@@ -85,6 +85,7 @@ var (
 		rangeEnd:   netip.MustParseAddr("172.24.255.255"),
 	}
 	dbPath = flag.String("db-path", defDBPath, "path to database")
+	ttl    = flag.Uint("ttl", 900, "TTL for responses")
 )
 
 func init() {
@@ -116,6 +117,7 @@ func run() int {
 		ListenAddr: dnsBindAddress.value,
 		Upstream:   *dnsUpstream,
 		Mapper:     mapping,
+		TTL:        uint32(*ttl),
 	}
 
 	log.Println("Starting DNS server...")

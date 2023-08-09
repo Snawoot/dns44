@@ -15,14 +15,12 @@ import (
 	"github.com/miekg/dns"
 )
 
-// defaultTTL is the default TTL for the rewritten records.
-const defaultTTL = 900
-
 // DNSProxy is a struct that manages the DNS proxy server.  This server's
 // purpose is to redirect queries to a specified SNI proxy.
 type DNSProxy struct {
 	proxy  *proxy.Proxy
 	mapper Mapper
+	ttl    uint32
 }
 
 // type check
@@ -40,6 +38,7 @@ func New(cfg *Config) (d *DNSProxy, err error) {
 			Config: proxyConfig,
 		},
 		mapper: cfg.Mapper,
+		ttl:    cfg.TTL,
 	}
 	d.proxy.Config.RequestHandler = d.requestHandler
 
@@ -89,7 +88,7 @@ func (d *DNSProxy) rewrite(qName string, qType uint16, ctx *proxy.DNSContext) er
 	} else {
 		clientKey = clientAddrPort.Addr().String()
 	}
-	answerAddress, err := d.mapper.EnsureMapping(clientKey, domainName, (defaultTTL+1)*time.Second)
+	answerAddress, err := d.mapper.EnsureMapping(clientKey, domainName, time.Duration(d.ttl+1)*time.Second)
 	if err != nil {
 		return fmt.Errorf("mapping error: %w", err)
 	}
@@ -98,7 +97,7 @@ func (d *DNSProxy) rewrite(qName string, qType uint16, ctx *proxy.DNSContext) er
 		Name:   qName,
 		Rrtype: qType,
 		Class:  dns.ClassINET,
-		Ttl:    defaultTTL,
+		Ttl:    d.ttl,
 	}
 
 	switch qType {

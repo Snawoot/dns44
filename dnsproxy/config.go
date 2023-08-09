@@ -21,4 +21,5 @@ type Config struct {
 
 	// Mapper is the database which grants one to one mapping between domain and network address
 	Mapper Mapper
+	TTL    uint32
 }
