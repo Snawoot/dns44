@@ -2,18 +2,36 @@ package mapping
 
 import (
 	"database/sql"
+	"errors"
 	"fmt"
+	"math"
 	"net/netip"
 	"net/url"
 	"path/filepath"
+	"time"
 
 	_ "modernc.org/sqlite"
 )
 
-var initQueries = []string{
-	"PRAGMA journal_mode=WAL",
-	"PRAGMA synchronous=NORMAL",
-}
+const (
+	insertRetries = 20
+)
+
+var (
+	initQueries = []string{
+		`CREATE TABLE IF NOT EXISTS mapping (
+  client_key TEXT NOT NULL,
+  domain_name TEXT NOT NULL,
+  mapped_addr TEXT NOT NULL,
+  expire INTEGER,
+  PRIMARY KEY (client_key, domain_name),
+  UNIQUE (client_key, mapped_addr)
+ ) STRICT`,
+		`CREATE INDEX IF NOT EXISTS mapping_expire_idx ON mapping (expire ASC) WHERE expire IS NOT NULL`,
+	}
+
+	ErrTooManyAttempts = errors.New("too many failed attempts")
+)
 
 type AddrPool interface {
 	GetRandom() netip.Addr
@@ -45,10 +63,52 @@ func New(dbPath string, addrPool AddrPool) (*SQLiteMapping, error) {
 		return nil, fmt.Errorf("DB ping failed: %w", err)
 	}
 
+	for _, query := range initQueries {
+		if _, err = db.Exec(query); err != nil {
+			return nil, fmt.Errorf("setup command (%q) error: %w", query, err)
+		}
+	}
+
 	return &SQLiteMapping{
 		db:       db,
 		addrPool: addrPool,
 	}, nil
+}
+
+func (m *SQLiteMapping) EnsureMapping(clientKey, domainName string, ttl time.Duration) (netip.Addr, error) {
+	if err := m.purgeExpired(); err != nil {
+		return netip.Addr{}, err
+	}
+	for i := 0; i < insertRetries; i++ {
+		addrCandidate := m.addrPool.GetRandom()
+		expire := time.Now().Unix() + int64(math.Round(ttl.Seconds()))
+		row := m.db.QueryRow(
+			`INSERT INTO mapping (client_key, domain_name, mapped_addr, expire)
+			VALUES (?, ?, ?, ?)
+			ON CONFLICT (client_key, domain_name) DO UPDATE SET expire = ?
+			ON CONFLICT (client_key, mapped_addr) DO NOTHING RETURNING mapped_addr`,
+			clientKey, domainName, addrCandidate.String(), expire, expire,
+		)
+		var ipStr string
+		if err := row.Scan(&ipStr); err != nil {
+			if err == sql.ErrNoRows {
+				continue
+			}
+			return netip.Addr{}, fmt.Errorf("upsert query error: %w", err)
+		}
+		res, err := netip.ParseAddr(ipStr)
+		if err != nil {
+			return netip.Addr{}, fmt.Errorf("can't parse IP address %q from DB: %w", ipStr, err)
+		}
+
+		return res, nil
+	}
+	return netip.Addr{}, ErrTooManyAttempts
+}
+
+func (m *SQLiteMapping) purgeExpired() error {
+	_, err := m.db.Exec("DELETE FROM mapping WHERE expire < ?", time.Now().Unix())
+	return err
 }
 
 func (m *SQLiteMapping) Close() error {
