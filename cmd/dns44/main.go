@@ -17,6 +17,33 @@ const (
 	ProgName = "DNS44"
 )
 
+type addressRange struct {
+	rangeStart netip.Addr
+	rangeEnd   netip.Addr
+}
+
+func (r *addressRange) String() string {
+	if r == nil {
+		return "<nil>-<nil>"
+	}
+	return fmt.Sprintf("%s-%s", r.rangeStart, r.rangeEnd)
+}
+
+func (r *addressRange) Set(arg string) error {
+	parts := strings.SplitN(arg, "-", 2)
+	start, err := netip.ParseAddr(parts[0])
+	if err != nil {
+		return fmt.Errorf("unable to parse start address: %w", err)
+	}
+	end, err := netip.ParseAddr(parts[1])
+	if err != nil {
+		return fmt.Errorf("unable to parse end address: %w", err)
+	}
+	r.rangeStart = start
+	r.rangeEnd = end
+	return nil
+}
+
 var (
 	home, _ = os.UserHomeDir()
 	version = "undefined"
@@ -24,7 +51,15 @@ var (
 	showVersion    = flag.Bool("version", false, "show program version and exit")
 	dnsBindAddress = flag.String("dns-bind-address", "127.0.0.1:4453", "DNS service bind address")
 	dnsUpstream    = flag.String("dns-upstream", "1.1.1.1", "upstream DNS server")
+	ipRange        = &addressRange{
+		rangeStart: netip.MustParseAddr("172.24.0.0"),
+		rangeEnd:   netip.MustParseAddr("172.24.255.255"),
+	}
 )
+
+func init() {
+	flag.Var(ipRange, "ip-range", "IP address range where all DNS requests are mapped")
+}
 
 func run() int {
 	flag.Parse()
