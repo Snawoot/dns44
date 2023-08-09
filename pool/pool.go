@@ -9,10 +9,14 @@ import (
 	"github.com/Snawoot/dns44/utils/random"
 )
 
-type AddressPool struct {
+type addressPoolV4 struct {
 	base uint32
 	size uint32
 	rng  *rand.Rand
+}
+
+type AddressPool interface {
+	GetRandom() netip.Addr
 }
 
 var (
@@ -20,7 +24,7 @@ var (
 	ErrBadOrder                 = errors.New("end of range is less than start of range")
 )
 
-func New(start, end netip.Addr) (*AddressPool, error) {
+func New(start, end netip.Addr) (AddressPool, error) {
 	if !start.Is4() || !end.Is4() {
 		return nil, ErrUnsupportedAddressFamily
 	}
@@ -29,14 +33,14 @@ func New(start, end netip.Addr) (*AddressPool, error) {
 	}
 
 	base := binary.BigEndian.Uint32(start.AsSlice())
-	return &AddressPool{
+	return &addressPoolV4{
 		base: base,
 		size: binary.BigEndian.Uint32(end.AsSlice()) - base + 1,
 		rng:  random.NewTimeSeededRand(),
 	}, nil
 }
 
-func (p *AddressPool) GetRandom() netip.Addr {
+func (p *addressPoolV4) GetRandom() netip.Addr {
 	ip := p.base + uint32(p.rng.Intn(int(p.size)))
 	ipSlice := make([]byte, 4)
 	binary.BigEndian.PutUint32(ipSlice, ip)
