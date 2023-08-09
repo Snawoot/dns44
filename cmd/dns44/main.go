@@ -17,6 +17,26 @@ const (
 	ProgName = "DNS44"
 )
 
+type addrPort struct {
+	value netip.AddrPort
+}
+
+func (a *addrPort) String() string {
+	if a == nil {
+		return "<nil>"
+	}
+	return a.value.String()
+}
+
+func (a *addrPort) Set(arg string) error {
+	parsed, err := netip.ParseAddrPort(arg)
+	if err != nil {
+		return fmt.Errorf("unable to parse address-port %q: %w", arg, err)
+	}
+	a.value = parsed
+	return nil
+}
+
 type addressRange struct {
 	rangeStart netip.Addr
 	rangeEnd   netip.Addr
@@ -52,7 +72,9 @@ var (
 	version = "undefined"
 
 	showVersion    = flag.Bool("version", false, "show program version and exit")
-	dnsBindAddress = flag.String("dns-bind-address", "127.0.0.1:4453", "DNS service bind address")
+	dnsBindAddress = &addrPort{
+		value: netip.MustParseAddrPort("127.0.0.1:4453"),
+	}
 	dnsUpstream    = flag.String("dns-upstream", "1.1.1.1", "upstream DNS server")
 	ipRange        = &addressRange{
 		rangeStart: netip.MustParseAddr("172.24.0.0"),
@@ -62,6 +84,7 @@ var (
 
 func init() {
 	flag.Var(ipRange, "ip-range", "IP address range where all DNS requests are mapped")
+	flag.Var(dnsBindAddress, "dns-bind-address", "DNS service bind address")
 }
 
 func run() int {
@@ -72,13 +95,8 @@ func run() int {
 		return 0
 	}
 
-	parsedDNSBindAddress, err := netip.ParseAddrPort(*dnsBindAddress)
-	if err != nil {
-		log.Fatalf("can't parse DNS bind address: %v", err)
-	}
-
 	dnsCfg := dnsproxy.Config{
-		ListenAddr: parsedDNSBindAddress,
+		ListenAddr: dnsBindAddress.value,
 		Upstream:   *dnsUpstream,
 	}
 
