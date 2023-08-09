@@ -4,17 +4,20 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"log"
 	"math"
 	"net/netip"
 	"net/url"
 	"path/filepath"
+	"sync"
 	"time"
 
 	_ "modernc.org/sqlite"
 )
 
 const (
-	insertRetries = 20
+	insertRetries           = 20
+	cleanupDebounceInterval = 1 * time.Second
 )
 
 var (
@@ -38,8 +41,10 @@ type AddrPool interface {
 }
 
 type SQLiteMapping struct {
-	db       *sql.DB
-	addrPool AddrPool
+	db          *sql.DB
+	addrPool    AddrPool
+	lastCleanup time.Time
+	cleanupMux  sync.RWMutex
 }
 
 func New(dbPath string, addrPool AddrPool) (*SQLiteMapping, error) {
@@ -76,9 +81,8 @@ func New(dbPath string, addrPool AddrPool) (*SQLiteMapping, error) {
 }
 
 func (m *SQLiteMapping) EnsureMapping(clientKey, domainName string, ttl time.Duration) (netip.Addr, error) {
-	if err := m.purgeExpired(); err != nil {
-		return netip.Addr{}, err
-	}
+	m.cleanup()
+
 	for i := 0; i < insertRetries; i++ {
 		addrCandidate := m.addrPool.GetRandom()
 		expire := time.Now().Unix() + int64(math.Round(ttl.Seconds()))
@@ -104,6 +108,21 @@ func (m *SQLiteMapping) EnsureMapping(clientKey, domainName string, ttl time.Dur
 		return res, nil
 	}
 	return netip.Addr{}, ErrTooManyAttempts
+}
+
+func (m *SQLiteMapping) cleanup() {
+	m.cleanupMux.RLock()
+	lastCleanup := m.lastCleanup
+	m.cleanupMux.RUnlock()
+
+	if time.Now().Sub(lastCleanup) > cleanupDebounceInterval {
+		m.cleanupMux.Lock()
+		defer m.cleanupMux.Unlock()
+		if err := m.purgeExpired(); err != nil {
+			log.Printf("DB cleanup failed: %s")
+		}
+		m.lastCleanup = time.Now()
+	}
 }
 
 func (m *SQLiteMapping) purgeExpired() error {
