@@ -31,6 +31,9 @@ func (r *addressRange) String() string {
 
 func (r *addressRange) Set(arg string) error {
 	parts := strings.SplitN(arg, "-", 2)
+	if len(parts) < 2 {
+		return fmt.Errorf("bad number of components in range. expected 2, got %d", len(parts))
+	}
 	start, err := netip.ParseAddr(parts[0])
 	if err != nil {
 		return fmt.Errorf("unable to parse start address: %w", err)
