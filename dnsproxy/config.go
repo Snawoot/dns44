@@ -2,7 +2,12 @@ package dnsproxy
 
 import (
 	"net/netip"
+	"time"
 )
+
+type Mapper interface {
+	EnsureMapping(clientKey, domainName string, ttl time.Duration) (netip.Addr, error)
+}
 
 // Config is the DNS proxy configuration.
 type Config struct {
@@ -13,4 +18,7 @@ type Config struct {
 	// format of an upstream is the one that can be consumed by
 	// [proxy.ParseUpstreamsConfig].
 	Upstream string
+
+	// Mapper is the database which grants one to one mapping between domain and network address
+	Mapper Mapper
 }

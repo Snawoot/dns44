@@ -5,8 +5,11 @@ package dnsproxy
 import (
 	"fmt"
 	"io"
+	"log"
 	"net"
+	"net/netip"
 	"strings"
+	"time"
 
 	"github.com/AdguardTeam/dnsproxy/proxy"
 	"github.com/miekg/dns"
@@ -18,7 +21,8 @@ const defaultTTL = 60
 // DNSProxy is a struct that manages the DNS proxy server.  This server's
 // purpose is to redirect queries to a specified SNI proxy.
 type DNSProxy struct {
-	proxy *proxy.Proxy
+	proxy  *proxy.Proxy
+	mapper Mapper
 }
 
 // type check
@@ -31,11 +35,13 @@ func New(cfg *Config) (d *DNSProxy, err error) {
 		return nil, fmt.Errorf("dnsproxy: invalid configuration: %w", err)
 	}
 
-	d = &DNSProxy{}
-	d.proxy = &proxy.Proxy{
-		Config: proxyConfig,
+	d = &DNSProxy{
+		proxy: &proxy.Proxy{
+			Config: proxyConfig,
+		},
+		mapper: cfg.Mapper,
 	}
-	d.proxy.RequestHandler = d.requestHandler
+	d.proxy.Config.RequestHandler = d.requestHandler
 
 	return d, nil
 }
@@ -55,14 +61,13 @@ func (d *DNSProxy) Close() (err error) {
 // requestHandler is a [proxy.RequestHandler] implementation which purpose is
 // to implement the actual mapping logic.
 func (d *DNSProxy) requestHandler(p *proxy.Proxy, ctx *proxy.DNSContext) (err error) {
-	qName := strings.ToLower(ctx.Req.Question[0].Name)
+	qName := ctx.Req.Question[0].Name
 	qType := ctx.Req.Question[0].Qtype
 
-	// TODO: actually use domain name
-	// domainName := strings.TrimSuffix(qName, ".")
-
 	if qType == dns.TypeA || qType == dns.TypeAAAA {
-		d.rewrite(qName, qType, ctx)
+		if err := d.rewrite(qName, qType, ctx); err != nil {
+			return fmt.Errorf("rewrite error: %w", err)
+		}
 		return nil
 	}
 
@@ -71,10 +76,23 @@ func (d *DNSProxy) requestHandler(p *proxy.Proxy, ctx *proxy.DNSContext) (err er
 
 // rewrite rewrites the specified query and redirects the response to the
 // configured IP addresses.
-func (d *DNSProxy) rewrite(qName string, qType uint16, ctx *proxy.DNSContext) {
+func (d *DNSProxy) rewrite(qName string, qType uint16, ctx *proxy.DNSContext) error {
 	resp := &dns.Msg{}
 	resp.SetReply(ctx.Req)
 	resp.Compress = true
+
+	domainName := strings.TrimSuffix(strings.ToLower(qName), ".")
+	clientKey := "<bogus>"
+	clientAddrPort, err := netip.ParseAddrPort(ctx.Addr.String())
+	if err != nil {
+		log.Println("can't parse ctx.Addr %q: %v", ctx.Addr.String(), err)
+	} else {
+		clientKey = clientAddrPort.Addr().String()
+	}
+	answerAddress, err := d.mapper.EnsureMapping(clientKey, domainName, defaultTTL+1*time.Second)
+	if err != nil {
+		return fmt.Errorf("mapping error: %w", err)
+	}
 
 	hdr := dns.RR_Header{
 		Name:   qName,
@@ -87,12 +105,13 @@ func (d *DNSProxy) rewrite(qName string, qType uint16, ctx *proxy.DNSContext) {
 	case dns.TypeA:
 		resp.Answer = append(resp.Answer, &dns.A{
 			Hdr: hdr,
-			A:   net.IPv4(3, 3, 3, 3),
+			A:   answerAddress.AsSlice(),
 		})
 	case dns.TypeAAAA:
 	}
 
 	ctx.Res = resp
+	return nil
 }
 
 // createProxyConfig creates DNS proxy configuration.

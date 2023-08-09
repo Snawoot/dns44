@@ -115,6 +115,7 @@ func run() int {
 	dnsCfg := dnsproxy.Config{
 		ListenAddr: dnsBindAddress.value,
 		Upstream:   *dnsUpstream,
+		Mapper:     mapping,
 	}
 
 	log.Println("Starting DNS server...")
