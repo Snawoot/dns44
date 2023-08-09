@@ -7,10 +7,12 @@ import (
 	"net/netip"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strings"
 	"syscall"
 
 	"github.com/Snawoot/dns44/dnsproxy"
+	"github.com/Snawoot/dns44/mapping"
 	"github.com/Snawoot/dns44/pool"
 )
 
@@ -69,8 +71,9 @@ func (r *addressRange) Set(arg string) error {
 }
 
 var (
-	home, _ = os.UserHomeDir()
-	version = "undefined"
+	home, _   = os.UserHomeDir()
+	defDBPath = filepath.Join(home, ".dns44", "db")
+	version   = "undefined"
 
 	showVersion    = flag.Bool("version", false, "show program version and exit")
 	dnsBindAddress = &addrPort{
@@ -81,6 +84,7 @@ var (
 		rangeStart: netip.MustParseAddr("172.24.0.0"),
 		rangeEnd:   netip.MustParseAddr("172.24.255.255"),
 	}
+	dbPath = flag.String("db-path", defDBPath, "path to database")
 )
 
 func init() {
@@ -101,8 +105,12 @@ func run() int {
 		log.Fatalf("unable to create IP pool: %v", err)
 	}
 
-	// TODO: use ipPool for mapping
-	ipPool = ipPool
+	ensureDir(*dbPath)
+	mapping, err := mapping.New(*dbPath, ipPool)
+	if err != nil {
+		log.Fatalf("mapping init failed: %v", err)
+	}
+	defer mapping.Close()
 
 	dnsCfg := dnsproxy.Config{
 		ListenAddr: dnsBindAddress.value,
