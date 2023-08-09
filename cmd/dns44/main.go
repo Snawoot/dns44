@@ -11,6 +11,7 @@ import (
 	"syscall"
 
 	"github.com/Snawoot/dns44/dnsproxy"
+	"github.com/Snawoot/dns44/pool"
 )
 
 const (
@@ -75,8 +76,8 @@ var (
 	dnsBindAddress = &addrPort{
 		value: netip.MustParseAddrPort("127.0.0.1:4453"),
 	}
-	dnsUpstream    = flag.String("dns-upstream", "1.1.1.1", "upstream DNS server")
-	ipRange        = &addressRange{
+	dnsUpstream = flag.String("dns-upstream", "1.1.1.1", "upstream DNS server")
+	ipRange     = &addressRange{
 		rangeStart: netip.MustParseAddr("172.24.0.0"),
 		rangeEnd:   netip.MustParseAddr("172.24.255.255"),
 	}
@@ -94,6 +95,14 @@ func run() int {
 		fmt.Println(version)
 		return 0
 	}
+
+	ipPool, err := pool.New(ipRange.rangeStart, ipRange.rangeEnd)
+	if err != nil {
+		log.Fatalf("unable to create IP pool: %v", err)
+	}
+
+	// TODO: use ipPool for mapping
+	ipPool = ipPool
 
 	dnsCfg := dnsproxy.Config{
 		ListenAddr: dnsBindAddress.value,
