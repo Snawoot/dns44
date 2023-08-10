@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"strings"
 	"syscall"
+	"time"
 
 	"github.com/Snawoot/dns44/dnsproxy"
 	"github.com/Snawoot/dns44/mapping"
@@ -91,6 +92,7 @@ var (
 	proxyBindAddress = &addrPort{
 		value: netip.MustParseAddrPort("127.0.0.1:4480"),
 	}
+	dialTimeout = flag.Duration("dial-timeout", 10*time.Second, "dial timeout for connection originated by proxy")
 )
 
 func init() {
@@ -142,7 +144,11 @@ func run() int {
 	appCtx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer cancel()
 
-	if _, err := tproxy.NewTCPProxy(appCtx, proxyBindAddress.value, nil); err != nil {
+	if _, err := tproxy.NewTCPProxy(appCtx, &tproxy.Config{
+		ListenAddr:  proxyBindAddress.value,
+		Mapper:      mapping,
+		DialTimeout: *dialTimeout,
+	}); err != nil {
 		log.Fatalf("unable to start TCP proxy: %v", err)
 	}
 

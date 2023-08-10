@@ -133,3 +133,17 @@ func (m *SQLiteMapping) purgeExpired() error {
 func (m *SQLiteMapping) Close() error {
 	return m.db.Close()
 }
+
+func (m *SQLiteMapping) ReverseLookup(clientKey string, addr netip.Addr) (domainName string, ok bool, err error) {
+	row := m.db.QueryRow("SELECT domain_name FROM mapping WHERE client_key = ? AND mapped_addr = ? LIMIT 1",
+		clientKey, addr.String())
+	var res string
+	if err := row.Scan(&res); err != nil {
+		if err == sql.ErrNoRows {
+			return "", false, nil
+		}
+		return "", false, fmt.Errorf("rev lookup query returned error: %w", err)
+	}
+
+	return res, true, nil
+}
