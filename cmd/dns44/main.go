@@ -17,6 +17,8 @@ import (
 	"github.com/Snawoot/dns44/mapping"
 	"github.com/Snawoot/dns44/pool"
 	"github.com/Snawoot/dns44/tproxy"
+
+	aglog "github.com/AdguardTeam/golibs/log"
 )
 
 const (
@@ -93,6 +95,7 @@ var (
 		value: netip.MustParseAddrPort("127.0.0.1:4480"),
 	}
 	dialTimeout = flag.Duration("dial-timeout", 10*time.Second, "dial timeout for connection originated by proxy")
+	debug       = flag.Bool("debug", false, "debug logging")
 )
 
 func init() {
@@ -107,6 +110,12 @@ func run() int {
 	if *showVersion {
 		fmt.Println(version)
 		return 0
+	}
+
+	if *debug {
+		aglog.SetLevel(aglog.DEBUG)
+	} else {
+		aglog.SetLevel(aglog.ERROR)
 	}
 
 	ipPool, err := pool.New(ipRange.rangeStart, ipRange.rangeEnd)
@@ -144,6 +153,7 @@ func run() int {
 	appCtx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer cancel()
 
+	log.Println("Starting TCP proxy server...")
 	if _, err := tproxy.NewTCPProxy(appCtx, &tproxy.Config{
 		ListenAddr:  proxyBindAddress.value,
 		Mapper:      mapping,
@@ -151,6 +161,7 @@ func run() int {
 	}); err != nil {
 		log.Fatalf("unable to start TCP proxy: %v", err)
 	}
+	log.Println("TCP proxy server started.")
 
 	<-appCtx.Done()
 
@@ -167,6 +178,5 @@ func main() {
 	log.Default().SetFlags(log.Ldate | log.Ltime | log.Lmicroseconds | log.Lshortfile)
 	log.Default().SetPrefix(strings.ToUpper(ProgName) + ": ")
 	log.SetOutput(os.Stderr)
-	//aglog.SetLevel(aglog.DEBUG)
 	os.Exit(run())
 }
