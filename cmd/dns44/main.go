@@ -89,7 +89,7 @@ var (
 	dbPath           = flag.String("db-path", defDBPath, "path to database")
 	ttl              = flag.Uint("ttl", 900, "TTL for responses")
 	proxyBindAddress = &addrPort{
-		value: netip.MustParseAddrPort("0.0.0.0:4480"),
+		value: netip.MustParseAddrPort("127.0.0.1:4480"),
 	}
 )
 
