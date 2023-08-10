@@ -167,5 +167,6 @@ func main() {
 	log.Default().SetFlags(log.Ldate | log.Ltime | log.Lmicroseconds | log.Lshortfile)
 	log.Default().SetPrefix(strings.ToUpper(ProgName) + ": ")
 	log.SetOutput(os.Stderr)
+	//aglog.SetLevel(aglog.DEBUG)
 	os.Exit(run())
 }

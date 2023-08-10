@@ -62,6 +62,7 @@ func (d *DNSProxy) Close() (err error) {
 func (d *DNSProxy) requestHandler(p *proxy.Proxy, ctx *proxy.DNSContext) (err error) {
 	qName := ctx.Req.Question[0].Name
 	qType := ctx.Req.Question[0].Qtype
+	log.Printf("DNS ?%s %s", dns.TypeToString[qType], qName)
 
 	if qType == dns.TypeA || qType == dns.TypeAAAA {
 		if err := d.rewrite(qName, qType, ctx); err != nil {
@@ -107,6 +108,7 @@ func (d *DNSProxy) rewrite(qName string, qType uint16, ctx *proxy.DNSContext) er
 			A:   answerAddress.AsSlice(),
 		})
 	case dns.TypeAAAA:
+		resp.Answer = []dns.RR{}
 	}
 
 	ctx.Res = resp

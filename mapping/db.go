@@ -60,6 +60,8 @@ func New(dbPath string, addrPool AddrPool) (*SQLiteMapping, error) {
 		return nil, fmt.Errorf("can't open database: %w", err)
 	}
 
+	db.SetMaxOpenConns(1)
+
 	if err := db.Ping(); err != nil {
 		return nil, fmt.Errorf("DB ping failed: %w", err)
 	}
