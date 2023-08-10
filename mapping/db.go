@@ -22,6 +22,8 @@ const (
 
 var (
 	initQueries = []string{
+		`PRAGMA journal_mode=WAL`,
+		`PRAGMA synchronous=NORMAL`,
 		`CREATE TABLE IF NOT EXISTS mapping (
   client_key TEXT NOT NULL,
   domain_name TEXT NOT NULL,
@@ -52,12 +54,6 @@ func New(dbPath string, addrPool AddrPool) (*SQLiteMapping, error) {
 		Scheme:   "file",
 		Path:     filepath.Join(dbPath, "mapping.db"),
 		OmitHost: true,
-		RawQuery: url.Values{
-			"_pragma": []string{
-				"journal_mode(WAL)",
-				"synchronous(NORMAL)",
-			},
-		}.Encode(),
 	}
 	db, err := sql.Open("sqlite", dbURL.String())
 	if err != nil {
