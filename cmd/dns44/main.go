@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	"log"
@@ -14,6 +15,7 @@ import (
 	"github.com/Snawoot/dns44/dnsproxy"
 	"github.com/Snawoot/dns44/mapping"
 	"github.com/Snawoot/dns44/pool"
+	"github.com/Snawoot/dns44/tproxy"
 )
 
 const (
@@ -84,13 +86,17 @@ var (
 		rangeStart: netip.MustParseAddr("172.24.0.0"),
 		rangeEnd:   netip.MustParseAddr("172.24.255.255"),
 	}
-	dbPath = flag.String("db-path", defDBPath, "path to database")
-	ttl    = flag.Uint("ttl", 900, "TTL for responses")
+	dbPath           = flag.String("db-path", defDBPath, "path to database")
+	ttl              = flag.Uint("ttl", 900, "TTL for responses")
+	proxyBindAddress = &addrPort{
+		value: netip.MustParseAddrPort("0.0.0.0:4480"),
+	}
 )
 
 func init() {
 	flag.Var(ipRange, "ip-range", "IP address range where all DNS requests are mapped")
 	flag.Var(dnsBindAddress, "dns-bind-address", "DNS service bind address")
+	flag.Var(proxyBindAddress, "proxy-bind-address", "transparent proxy service bind address")
 }
 
 func run() int {
@@ -127,15 +133,20 @@ func run() int {
 	}
 
 	if err := dnsProxy.Start(); err != nil {
-		log.Fatalf("Unable to start DNS server: %v", err)
+		log.Fatalf("unable to start DNS server: %v", err)
 	}
 	defer dnsProxy.Close()
 	log.Println("DNS server started.")
 
 	// Subscribe to the OS events.
-	signalChannel := make(chan os.Signal, 1)
-	signal.Notify(signalChannel, syscall.SIGINT, syscall.SIGTERM)
-	<-signalChannel
+	appCtx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer cancel()
+
+	if _, err := tproxy.NewTCPProxy(appCtx, proxyBindAddress.value, nil); err != nil {
+		log.Fatalf("unable to start TCP proxy: %v", err)
+	}
+
+	<-appCtx.Done()
 
 	return 0
 }
