@@ -119,7 +119,7 @@ func (m *SQLiteMapping) cleanup() {
 		m.cleanupMux.Lock()
 		defer m.cleanupMux.Unlock()
 		if err := m.purgeExpired(); err != nil {
-			log.Printf("DB cleanup failed: %s")
+			log.Printf("DB cleanup failed: %v", err)
 		}
 		m.lastCleanup = time.Now()
 	}

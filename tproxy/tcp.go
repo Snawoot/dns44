@@ -3,10 +3,12 @@ package tproxy
 import (
 	"context"
 	"fmt"
+	"io"
 	"log"
 	"net"
 	"net/netip"
 	"strconv"
+	"sync"
 	"time"
 )
 
@@ -65,7 +67,6 @@ func (t *TCPProxy) listen() {
 }
 
 func (t *TCPProxy) handle(conn net.Conn) {
-	log.Printf("accept: TCP %s <=> %s", conn.RemoteAddr().String(), conn.LocalAddr().String())
 	defer conn.Close()
 
 	rAddr, err := netip.ParseAddrPort(conn.RemoteAddr().String())
@@ -95,6 +96,8 @@ func (t *TCPProxy) handle(conn net.Conn) {
 		return
 	}
 
+	log.Printf("[+] TCP %s <=> [%s(%s)]:%d", rAddr.String(), domainName, lAddr.Addr().String(), lAddr.Port())
+
 	dialAddress := net.JoinHostPort(domainName, strconv.FormatUint(uint64(lAddr.Port()), 10))
 	dialCtx, cancel := context.WithTimeout(t.baseCtx, t.dialTimeout)
 	defer cancel()
@@ -106,5 +109,46 @@ func (t *TCPProxy) handle(conn net.Conn) {
 	}
 	defer upstreamConn.Close()
 
-	conn.Write([]byte("Hello, World!\n"))
+	proxyStream(conn, upstreamConn)
+	log.Printf("[+] TCP %s <=> [%s(%s)]:%d", rAddr.String(), domainName, lAddr.Addr().String(), lAddr.Port())
+}
+
+func proxyStream(left, right net.Conn) {
+	var wg sync.WaitGroup
+	wg.Add(2)
+
+	go func() {
+		defer wg.Done()
+		unidirForward(left, right)
+	}()
+	go func() {
+		defer wg.Done()
+		unidirForward(right, left)
+	}()
+
+	wg.Wait()
+}
+
+func unidirForward(from, to net.Conn) {
+	io.Copy(to, from)
+	shutdownWrite(to)
+}
+
+type EOFSender interface {
+	CloseWrite() error
+}
+
+type RawConnContainer interface {
+	Raw() net.Conn
+}
+
+func shutdownWrite(conn net.Conn) error {
+	switch c := conn.(type) {
+	case EOFSender:
+		return c.CloseWrite()
+	case RawConnContainer:
+		return shutdownWrite(c.Raw())
+	default:
+		return c.Close()
+	}
 }
