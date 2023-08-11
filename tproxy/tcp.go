@@ -74,11 +74,13 @@ func (t *TCPProxy) handle(conn net.Conn) {
 		log.Printf("can't parse remote address: %v", err)
 		return
 	}
+	rAddr = netip.AddrPortFrom(rAddr.Addr().Unmap(), rAddr.Port())
 	lAddr, err := netip.ParseAddrPort(conn.LocalAddr().String())
 	if err != nil {
 		log.Printf("can't parse local address: %v", err)
 		return
 	}
+	lAddr = netip.AddrPortFrom(lAddr.Addr().Unmap(), lAddr.Port())
 
 	domainName, ok, err := t.mapper.ReverseLookup(rAddr.Addr().String(), lAddr.Addr())
 	if err != nil {

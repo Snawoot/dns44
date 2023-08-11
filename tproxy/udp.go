@@ -105,7 +105,6 @@ func (proxy *UDPProxy) replyLoop(proxyConn net.Conn, clientAddr *net.UDPAddr, lo
 			}
 			log.Printf("reply loop (%s) stopped on read for reason: %v", ctKey.String(), err)
 			return
-		} else {
 		}
 		for i := 0; i != read; {
 			written, err := respConn.Write(readBuf[i:read])
@@ -124,7 +123,6 @@ func (proxy *UDPProxy) listen() {
 	readBuf := make([]byte, UDPBufSize)
 	for {
 		read, from, to, err := ReadFromUDP(proxy.listener, readBuf)
-		// TODO: normalize mapped addresses to IPv4 form
 		if err != nil {
 			// NOTE: Apparently ReadFrom doesn't return
 			// ECONNREFUSED like Read do (see comment in
@@ -134,6 +132,7 @@ func (proxy *UDPProxy) listen() {
 			}
 			break
 		}
+		from, to = unmapUDPAddr(from), unmapUDPAddr(to)
 
 		ctKey := connTrackKey{from.AddrPort(), to.AddrPort()}
 		proxy.connTrackLock.Lock()
@@ -162,8 +161,6 @@ func (proxy *UDPProxy) listen() {
 
 func (proxy *UDPProxy) makeOutboundConn(from, to netip.AddrPort) (net.Conn, error) {
 	// TODO: implement deferred Dial so it won't block socket recv loop
-	from = netip.AddrPortFrom(from.Addr().Unmap(), from.Port())
-	to = netip.AddrPortFrom(to.Addr().Unmap(), to.Port())
 	domainName, ok, err := proxy.mapper.ReverseLookup(from.Addr().String(), to.Addr())
 	if err != nil {
 		return nil, fmt.Errorf("reverse lookup in UDP handler failed: %w", err)
@@ -209,4 +206,10 @@ func isClosedError(err error) bool {
 	 * https://groups.google.com/forum/#!msg/golang-nuts/0_aaCvBmOcM/SptmDyX1XJMJ
 	 */
 	return strings.HasSuffix(err.Error(), "use of closed network connection")
+}
+
+func unmapUDPAddr(a *net.UDPAddr) *net.UDPAddr {
+	ap := a.AddrPort()
+	apu := netip.AddrPortFrom(ap.Addr().Unmap(), ap.Port())
+	return net.UDPAddrFromAddrPort(apu)
 }
