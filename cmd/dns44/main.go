@@ -130,6 +130,10 @@ func run() int {
 	}
 	defer mapping.Close()
 
+	// Subscribe to the OS events.
+	appCtx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer cancel()
+
 	dnsCfg := dnsproxy.Config{
 		ListenAddr: dnsBindAddress.value,
 		Upstream:   *dnsUpstream,
@@ -149,16 +153,22 @@ func run() int {
 	defer dnsProxy.Close()
 	log.Println("DNS server started.")
 
-	// Subscribe to the OS events.
-	appCtx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
-	defer cancel()
-
-	log.Println("Starting TCP proxy server...")
-	if _, err := tproxy.NewTCPProxy(appCtx, &tproxy.Config{
+	proxyCfg := &tproxy.Config{
 		ListenAddr:  proxyBindAddress.value,
 		Mapper:      mapping,
 		DialTimeout: *dialTimeout,
-	}); err != nil {
+	}
+
+	log.Println("Starting UDP proxy server...")
+	udpProxy, err := tproxy.NewUDPProxy(appCtx, proxyCfg)
+	if err != nil {
+		log.Fatalf("unable to start UDP proxy: %v", err)
+	}
+	defer udpProxy.Close()
+	log.Println("UDP proxy server started.")
+
+	log.Println("Starting TCP proxy server...")
+	if _, err := tproxy.NewTCPProxy(appCtx, proxyCfg); err != nil {
 		log.Fatalf("unable to start TCP proxy: %v", err)
 	}
 	log.Println("TCP proxy server started.")

@@ -2,7 +2,6 @@ package tproxy
 
 import (
 	"context"
-	"encoding/binary"
 	"fmt"
 	"log"
 	"net"
@@ -24,24 +23,12 @@ const (
 // A net.Addr where the IP is split into two fields so you can use it as a key
 // in a map:
 type connTrackKey struct {
-	IPHigh uint64
-	IPLow  uint64
-	Port   int
+	from netip.AddrPort
+	to   netip.AddrPort
 }
 
-func newConnTrackKey(addr *net.UDPAddr) *connTrackKey {
-	if len(addr.IP) == net.IPv4len {
-		return &connTrackKey{
-			IPHigh: 0,
-			IPLow:  uint64(binary.BigEndian.Uint32(addr.IP)),
-			Port:   addr.Port,
-		}
-	}
-	return &connTrackKey{
-		IPHigh: binary.BigEndian.Uint64(addr.IP[:8]),
-		IPLow:  binary.BigEndian.Uint64(addr.IP[8:]),
-		Port:   addr.Port,
-	}
+func (key connTrackKey) String() string {
+	return fmt.Sprintf("<%s,%s>", key.from.String(), key.to.String())
 }
 
 type connTrackMap map[connTrackKey]net.Conn
@@ -80,17 +67,21 @@ func NewUDPProxy(ctx context.Context, cfg *Config) (*UDPProxy, error) {
 		dialTimeout: cfg.DialTimeout,
 	}
 
+	go proxy.listen()
+
 	return proxy, nil
 }
 
-func (proxy *UDPProxy) replyLoop(proxyConn net.Conn, clientAddr *net.UDPAddr, clientKey *connTrackKey) {
+func (proxy *UDPProxy) replyLoop(proxyConn net.Conn, clientAddr *net.UDPAddr, ctKey connTrackKey) {
 	defer func() {
 		proxy.connTrackLock.Lock()
-		delete(proxy.connTrackTable, *clientKey)
+		delete(proxy.connTrackTable, ctKey)
 		proxy.connTrackLock.Unlock()
 		proxyConn.Close()
+		log.Printf("[-] UDP %s <=> %s", ctKey.from.String(), ctKey.to.String())
 	}()
 
+	log.Printf("starting reply loop; proxy conn lAddr = %s; rAddr = %s", proxyConn.LocalAddr(), proxyConn.LocalAddr())
 	readBuf := make([]byte, UDPBufSize)
 	for {
 		proxyConn.SetReadDeadline(time.Now().Add(UDPConnTrackTimeout))
@@ -105,24 +96,30 @@ func (proxy *UDPProxy) replyLoop(proxyConn net.Conn, clientAddr *net.UDPAddr, cl
 				// expires:
 				goto again
 			}
+			log.Printf("reply loop (%s) stopped on read for reason: %v", ctKey.String(), err)
 			return
+		} else {
+			log.Printf("successful read in reply loop")
 		}
 		for i := 0; i != read; {
 			written, err := proxy.listener.WriteToUDP(readBuf[i:read], clientAddr)
 			if err != nil {
+				log.Printf("reply loop (%s) stopped on write for reason: %v", ctKey.String(), err)
 				return
 			}
+			log.Printf("WRITE in reply loop")
 			i += written
 		}
 	}
 }
 
-// Run starts forwarding the traffic using UDP.
-func (proxy *UDPProxy) Run() {
+// listen starts forwarding the traffic using UDP.
+func (proxy *UDPProxy) listen() {
 	proxy.connTrackTable = make(connTrackMap)
 	readBuf := make([]byte, UDPBufSize)
 	for {
 		read, from, to, err := ReadFromUDP(proxy.listener, readBuf)
+		// TODO: normalize mapped addresses to IPv4 form
 		if err != nil {
 			// NOTE: Apparently ReadFrom doesn't return
 			// ECONNREFUSED like Read do (see comment in
@@ -132,19 +129,23 @@ func (proxy *UDPProxy) Run() {
 			}
 			break
 		}
+		log.Printf("UDP packet received: %s => %s", from, to)
 
-		fromKey := newConnTrackKey(from)
+		ctKey := connTrackKey{from.AddrPort(), to.AddrPort()}
 		proxy.connTrackLock.Lock()
-		proxyConn, hit := proxy.connTrackTable[*fromKey]
+		proxyConn, hit := proxy.connTrackTable[ctKey]
 		if !hit {
-			proxyConn, err := proxy.makeOutboundConn(from.AddrPort(), to.AddrPort())
+			log.Printf("conntrack MISS for %s", ctKey)
+			proxyConn, err = proxy.makeOutboundConn(from.AddrPort(), to.AddrPort())
 			if err != nil {
 				log.Printf("can't proxy a datagram to udp: %v", err)
 				proxy.connTrackLock.Unlock()
 				continue
 			}
-			proxy.connTrackTable[*fromKey] = proxyConn
-			go proxy.replyLoop(proxyConn, from, fromKey)
+			proxy.connTrackTable[ctKey] = proxyConn
+			go proxy.replyLoop(proxyConn, from, ctKey)
+		} else {
+			log.Printf("conntrack HIT for %s", ctKey)
 		}
 		proxy.connTrackLock.Unlock()
 		for i := 0; i != read; {
@@ -153,6 +154,7 @@ func (proxy *UDPProxy) Run() {
 				log.Printf("can't proxy a datagram to udp: %v", err)
 				break
 			}
+			log.Printf("dispatch written %d out of %d", written, read)
 			i += written
 		}
 	}
@@ -160,6 +162,8 @@ func (proxy *UDPProxy) Run() {
 
 func (proxy *UDPProxy) makeOutboundConn(from, to netip.AddrPort) (net.Conn, error) {
 	// TODO: implement deferred Dial so it won't block socket recv loop
+	from = netip.AddrPortFrom(from.Addr().Unmap(), from.Port())
+	to = netip.AddrPortFrom(to.Addr().Unmap(), to.Port())
 	domainName, ok, err := proxy.mapper.ReverseLookup(from.Addr().String(), to.Addr())
 	if err != nil {
 		return nil, fmt.Errorf("reverse lookup in UDP handler failed: %w", err)
@@ -176,13 +180,14 @@ func (proxy *UDPProxy) makeOutboundConn(from, to netip.AddrPort) (net.Conn, erro
 	log.Printf("[+] UDP %s <=> [%s(%s)]:%d", from.String(), domainName, to.Addr().String(), to.Port())
 
 	dialAddress := net.JoinHostPort(domainName, strconv.FormatUint(uint64(to.Port()), 10))
-	dialCtx, cancel := context.WithTimeout(context.Background(), proxy.dialTimeout)
+	dialCtx, cancel := context.WithTimeout(proxy.baseCtx, proxy.dialTimeout)
 	defer cancel()
 
 	conn, err := proxy.dialer.DialContext(dialCtx, "udp", dialAddress)
 	if err != nil {
 		return nil, fmt.Errorf("remote dial failed: %w", err)
 	}
+	log.Printf("dialed %q, resulting conn lAddr = %s; rAddr = %s", dialAddress, conn.LocalAddr(), conn.RemoteAddr())
 
 	return conn, nil
 }
