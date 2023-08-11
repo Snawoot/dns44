@@ -87,12 +87,12 @@ func (t *TCPProxy) handle(conn net.Conn) {
 	}
 
 	if !ok {
-		log.Printf("reverse mapping not found for address %s", lAddr.Addr().String())
+		log.Printf("reverse mapping not found for address (%s=>%s)", rAddr.Addr().String(), lAddr.Addr().String())
 		return
 	}
 
 	if domainName == "" {
-		log.Printf("bad domain name for address %s", lAddr.Addr().String())
+		log.Printf("bad domain name for address (%s=>%s)", rAddr.Addr().String(), lAddr.Addr().String())
 		return
 	}
 

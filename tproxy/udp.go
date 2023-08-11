@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"log"
 	"net"
+	"net/netip"
+	"strconv"
 	"strings"
 	"sync"
 	"syscall"
@@ -42,7 +44,7 @@ func newConnTrackKey(addr *net.UDPAddr) *connTrackKey {
 	}
 }
 
-type connTrackMap map[connTrackKey]*net.UDPConn
+type connTrackMap map[connTrackKey]net.Conn
 
 type UDPProxy struct {
 	listener       *net.UDPConn
@@ -81,7 +83,7 @@ func NewUDPProxy(ctx context.Context, cfg *Config) (*UDPProxy, error) {
 	return proxy, nil
 }
 
-func (proxy *UDPProxy) replyLoop(proxyConn *net.UDPConn, clientAddr *net.UDPAddr, clientKey *connTrackKey) {
+func (proxy *UDPProxy) replyLoop(proxyConn net.Conn, clientAddr *net.UDPAddr, clientKey *connTrackKey) {
 	defer func() {
 		proxy.connTrackLock.Lock()
 		delete(proxy.connTrackTable, *clientKey)
@@ -120,7 +122,7 @@ func (proxy *UDPProxy) Run() {
 	proxy.connTrackTable = make(connTrackMap)
 	readBuf := make([]byte, UDPBufSize)
 	for {
-		read, from, _, err := ReadFromUDP(proxy.listener, readBuf)
+		read, from, to, err := ReadFromUDP(proxy.listener, readBuf)
 		if err != nil {
 			// NOTE: Apparently ReadFrom doesn't return
 			// ECONNREFUSED like Read do (see comment in
@@ -135,9 +137,7 @@ func (proxy *UDPProxy) Run() {
 		proxy.connTrackLock.Lock()
 		proxyConn, hit := proxy.connTrackTable[*fromKey]
 		if !hit {
-			// TODO: insert dest mapping here
-			proxyConn, err = proxy.BackendDial()
-			// TODO: implement deferred Dial so it won't block socket recv loop
+			proxyConn, err := proxy.makeOutboundConn(from.AddrPort(), to.AddrPort())
 			if err != nil {
 				log.Printf("can't proxy a datagram to udp: %v", err)
 				proxy.connTrackLock.Unlock()
@@ -156,6 +156,35 @@ func (proxy *UDPProxy) Run() {
 			i += written
 		}
 	}
+}
+
+func (proxy *UDPProxy) makeOutboundConn(from, to netip.AddrPort) (net.Conn, error) {
+	// TODO: implement deferred Dial so it won't block socket recv loop
+	domainName, ok, err := proxy.mapper.ReverseLookup(from.Addr().String(), to.Addr())
+	if err != nil {
+		return nil, fmt.Errorf("reverse lookup in UDP handler failed: %w", err)
+	}
+
+	if !ok {
+		return nil, fmt.Errorf("reverse mapping not found for address (%s=>%s)", from.Addr().String(), to.Addr().String())
+	}
+
+	if domainName == "" {
+		return nil, fmt.Errorf("bad domain name for address (%s=>%s)", from.Addr().String(), to.Addr().String())
+	}
+
+	log.Printf("[+] UDP %s <=> [%s(%s)]:%d", from.String(), domainName, to.Addr().String(), to.Port())
+
+	dialAddress := net.JoinHostPort(domainName, strconv.FormatUint(uint64(to.Port()), 10))
+	dialCtx, cancel := context.WithTimeout(context.Background(), proxy.dialTimeout)
+	defer cancel()
+
+	conn, err := proxy.dialer.DialContext(dialCtx, "udp", dialAddress)
+	if err != nil {
+		return nil, fmt.Errorf("remote dial failed: %w", err)
+	}
+
+	return conn, nil
 }
 
 // Close stops forwarding the traffic.
