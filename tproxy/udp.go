@@ -72,7 +72,7 @@ func NewUDPProxy(ctx context.Context, cfg *Config) (*UDPProxy, error) {
 	return proxy, nil
 }
 
-func (proxy *UDPProxy) replyLoop(proxyConn net.Conn, clientAddr *net.UDPAddr, ctKey connTrackKey) {
+func (proxy *UDPProxy) replyLoop(proxyConn net.Conn, clientAddr *net.UDPAddr, localAddr *net.UDPAddr, ctKey connTrackKey) {
 	defer func() {
 		proxy.connTrackLock.Lock()
 		delete(proxy.connTrackTable, ctKey)
@@ -80,6 +80,12 @@ func (proxy *UDPProxy) replyLoop(proxyConn net.Conn, clientAddr *net.UDPAddr, ct
 		proxyConn.Close()
 		log.Printf("[-] UDP %s <=> %s", ctKey.from.String(), ctKey.to.String())
 	}()
+
+	respConn, err := DialUDP("udp", localAddr, clientAddr)
+	if err != nil {
+		log.Printf("unable to open reply UDP connection: %v", err)
+	}
+	defer respConn.Close()
 
 	log.Printf("starting reply loop; proxy conn lAddr = %s; rAddr = %s", proxyConn.LocalAddr(), proxyConn.RemoteAddr())
 	readBuf := make([]byte, UDPBufSize)
@@ -101,7 +107,7 @@ func (proxy *UDPProxy) replyLoop(proxyConn net.Conn, clientAddr *net.UDPAddr, ct
 		} else {
 		}
 		for i := 0; i != read; {
-			written, err := proxy.listener.WriteToUDP(readBuf[i:read], clientAddr)
+			written, err := respConn.Write(readBuf[i:read])
 			if err != nil {
 				log.Printf("reply loop (%s) stopped on write for reason: %v", ctKey.String(), err)
 				return
@@ -142,7 +148,7 @@ func (proxy *UDPProxy) listen() {
 				continue
 			}
 			proxy.connTrackTable[ctKey] = proxyConn
-			go proxy.replyLoop(proxyConn, from, ctKey)
+			go proxy.replyLoop(proxyConn, from, to, ctKey)
 		} else {
 			log.Printf("conntrack HIT for %s", ctKey)
 		}
