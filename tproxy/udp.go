@@ -81,7 +81,7 @@ func (proxy *UDPProxy) replyLoop(proxyConn net.Conn, clientAddr *net.UDPAddr, ct
 		log.Printf("[-] UDP %s <=> %s", ctKey.from.String(), ctKey.to.String())
 	}()
 
-	log.Printf("starting reply loop; proxy conn lAddr = %s; rAddr = %s", proxyConn.LocalAddr(), proxyConn.LocalAddr())
+	log.Printf("starting reply loop; proxy conn lAddr = %s; rAddr = %s", proxyConn.LocalAddr(), proxyConn.RemoteAddr())
 	readBuf := make([]byte, UDPBufSize)
 	for {
 		proxyConn.SetReadDeadline(time.Now().Add(UDPConnTrackTimeout))
@@ -99,7 +99,6 @@ func (proxy *UDPProxy) replyLoop(proxyConn net.Conn, clientAddr *net.UDPAddr, ct
 			log.Printf("reply loop (%s) stopped on read for reason: %v", ctKey.String(), err)
 			return
 		} else {
-			log.Printf("successful read in reply loop")
 		}
 		for i := 0; i != read; {
 			written, err := proxy.listener.WriteToUDP(readBuf[i:read], clientAddr)
@@ -107,7 +106,7 @@ func (proxy *UDPProxy) replyLoop(proxyConn net.Conn, clientAddr *net.UDPAddr, ct
 				log.Printf("reply loop (%s) stopped on write for reason: %v", ctKey.String(), err)
 				return
 			}
-			log.Printf("WRITE in reply loop")
+			log.Printf("WRITE in reply loop to %s", clientAddr)
 			i += written
 		}
 	}
@@ -154,7 +153,6 @@ func (proxy *UDPProxy) listen() {
 				log.Printf("can't proxy a datagram to udp: %v", err)
 				break
 			}
-			log.Printf("dispatch written %d out of %d", written, read)
 			i += written
 		}
 	}
