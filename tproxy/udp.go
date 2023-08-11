@@ -160,32 +160,35 @@ func (proxy *UDPProxy) listen() {
 }
 
 func (proxy *UDPProxy) makeOutboundConn(from, to netip.AddrPort) (net.Conn, error) {
-	// TODO: implement deferred Dial so it won't block socket recv loop
-	domainName, ok, err := proxy.mapper.ReverseLookup(from.Addr().String(), to.Addr())
-	if err != nil {
-		return nil, fmt.Errorf("reverse lookup in UDP handler failed: %w", err)
-	}
+	futureConn := newFutureConn(func() (net.Conn, error) {
+		domainName, ok, err := proxy.mapper.ReverseLookup(from.Addr().String(), to.Addr())
+		if err != nil {
+			return nil, fmt.Errorf("reverse lookup in UDP handler failed: %w", err)
+		}
 
-	if !ok {
-		return nil, fmt.Errorf("reverse mapping not found for address (%s=>%s)", from.Addr().String(), to.Addr().String())
-	}
+		if !ok {
+			return nil, fmt.Errorf("reverse mapping not found for address (%s=>%s)", from.Addr().String(), to.Addr().String())
+		}
 
-	if domainName == "" {
-		return nil, fmt.Errorf("bad domain name for address (%s=>%s)", from.Addr().String(), to.Addr().String())
-	}
+		if domainName == "" {
+			return nil, fmt.Errorf("bad domain name for address (%s=>%s)", from.Addr().String(), to.Addr().String())
+		}
 
-	log.Printf("[+] UDP %s <=> [%s(%s)]:%d", from.String(), domainName, to.Addr().String(), to.Port())
+		log.Printf("[+] UDP %s <=> [%s(%s)]:%d", from.String(), domainName, to.Addr().String(), to.Port())
 
-	dialAddress := net.JoinHostPort(domainName, strconv.FormatUint(uint64(to.Port()), 10))
-	dialCtx, cancel := context.WithTimeout(proxy.baseCtx, proxy.dialTimeout)
-	defer cancel()
+		dialAddress := net.JoinHostPort(domainName, strconv.FormatUint(uint64(to.Port()), 10))
+		dialCtx, cancel := context.WithTimeout(proxy.baseCtx, proxy.dialTimeout)
+		defer cancel()
 
-	conn, err := proxy.dialer.DialContext(dialCtx, "udp", dialAddress)
-	if err != nil {
-		return nil, fmt.Errorf("remote dial failed: %w", err)
-	}
+		conn, err := proxy.dialer.DialContext(dialCtx, "udp", dialAddress)
+		if err != nil {
+			return nil, fmt.Errorf("remote dial failed: %w", err)
+		}
 
-	return conn, nil
+		return conn, nil
+	}, 0)
+
+	return futureConn, nil
 }
 
 // Close stops forwarding the traffic.
