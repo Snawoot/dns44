@@ -3,6 +3,7 @@ package tproxy
 import (
 	"context"
 	"fmt"
+	"io"
 	"log"
 	"net"
 	"net/netip"
@@ -86,8 +87,8 @@ func (proxy *UDPProxy) replyLoop(proxyConn net.Conn, clientAddr *net.UDPAddr, lo
 		log.Printf("unable to open reply UDP connection: %v", err)
 	}
 	defer respConn.Close()
+	go io.Copy(proxyConn, respConn)
 
-	log.Printf("starting reply loop; proxy conn lAddr = %s; rAddr = %s", proxyConn.LocalAddr(), proxyConn.RemoteAddr())
 	readBuf := make([]byte, UDPBufSize)
 	for {
 		proxyConn.SetReadDeadline(time.Now().Add(UDPConnTrackTimeout))
@@ -112,7 +113,6 @@ func (proxy *UDPProxy) replyLoop(proxyConn net.Conn, clientAddr *net.UDPAddr, lo
 				log.Printf("reply loop (%s) stopped on write for reason: %v", ctKey.String(), err)
 				return
 			}
-			log.Printf("WRITE in reply loop to %s", clientAddr)
 			i += written
 		}
 	}
@@ -134,13 +134,11 @@ func (proxy *UDPProxy) listen() {
 			}
 			break
 		}
-		log.Printf("UDP packet received: %s => %s", from, to)
 
 		ctKey := connTrackKey{from.AddrPort(), to.AddrPort()}
 		proxy.connTrackLock.Lock()
 		proxyConn, hit := proxy.connTrackTable[ctKey]
 		if !hit {
-			log.Printf("conntrack MISS for %s", ctKey)
 			proxyConn, err = proxy.makeOutboundConn(from.AddrPort(), to.AddrPort())
 			if err != nil {
 				log.Printf("can't proxy a datagram to udp: %v", err)
@@ -149,8 +147,6 @@ func (proxy *UDPProxy) listen() {
 			}
 			proxy.connTrackTable[ctKey] = proxyConn
 			go proxy.replyLoop(proxyConn, from, to, ctKey)
-		} else {
-			log.Printf("conntrack HIT for %s", ctKey)
 		}
 		proxy.connTrackLock.Unlock()
 		for i := 0; i != read; {
@@ -191,7 +187,6 @@ func (proxy *UDPProxy) makeOutboundConn(from, to netip.AddrPort) (net.Conn, erro
 	if err != nil {
 		return nil, fmt.Errorf("remote dial failed: %w", err)
 	}
-	log.Printf("dialed %q, resulting conn lAddr = %s; rAddr = %s", dialAddress, conn.LocalAddr(), conn.RemoteAddr())
 
 	return conn, nil
 }

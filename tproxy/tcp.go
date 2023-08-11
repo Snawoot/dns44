@@ -110,7 +110,7 @@ func (t *TCPProxy) handle(conn net.Conn) {
 	defer upstreamConn.Close()
 
 	proxyStream(conn, upstreamConn)
-	log.Printf("[+] TCP %s <=> [%s(%s)]:%d", rAddr.String(), domainName, lAddr.Addr().String(), lAddr.Port())
+	log.Printf("[-] TCP %s <=> [%s(%s)]:%d", rAddr.String(), domainName, lAddr.Addr().String(), lAddr.Port())
 }
 
 func proxyStream(left, right net.Conn) {
