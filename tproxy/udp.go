@@ -3,7 +3,6 @@ package tproxy
 import (
 	"context"
 	"fmt"
-	"io"
 	"log"
 	"net"
 	"net/netip"
@@ -42,6 +41,7 @@ type UDPProxy struct {
 	dialTimeout    time.Duration
 	connTrackTable connTrackMap
 	connTrackLock  sync.Mutex
+	rawUDPConn     *RawUDPConn
 }
 
 func NewUDPProxy(ctx context.Context, cfg *Config) (*UDPProxy, error) {
@@ -60,12 +60,22 @@ func NewUDPProxy(ctx context.Context, cfg *Config) (*UDPProxy, error) {
 		return nil, fmt.Errorf("unable to assert listener type")
 	}
 
+	af := "udp4"
+	if cfg.ListenAddr.Addr().Is6() {
+		af = "udp6"
+	}
+	rawUDPConn, err := NewRawUDPConn(af)
+	if err != nil {
+		return nil, fmt.Errorf("can't construct raw IP socket: %w", err)
+	}
+
 	proxy := &UDPProxy{
 		listener:    udpListener,
 		mapper:      cfg.Mapper,
 		baseCtx:     ctx,
 		dialer:      cfg.Dialer,
 		dialTimeout: cfg.DialTimeout,
+		rawUDPConn:  rawUDPConn,
 	}
 
 	go proxy.listen()
@@ -81,13 +91,6 @@ func (proxy *UDPProxy) replyLoop(proxyConn net.Conn, clientAddr *net.UDPAddr, lo
 		proxyConn.Close()
 		log.Printf("[-] UDP %s <=> %s", ctKey.from.String(), ctKey.to.String())
 	}()
-
-	respConn, err := DialUDP("udp", localAddr, clientAddr)
-	if err != nil {
-		log.Printf("unable to open reply UDP connection: %v", err)
-	}
-	defer respConn.Close()
-	go io.Copy(proxyConn, respConn)
 
 	readBuf := make([]byte, UDPBufSize)
 	for {
@@ -106,13 +109,9 @@ func (proxy *UDPProxy) replyLoop(proxyConn net.Conn, clientAddr *net.UDPAddr, lo
 			log.Printf("reply loop (%s) stopped on read for reason: %v", ctKey.String(), err)
 			return
 		}
-		for i := 0; i != read; {
-			written, err := respConn.Write(readBuf[i:read])
-			if err != nil {
-				log.Printf("reply loop (%s) stopped on write for reason: %v", ctKey.String(), err)
-				return
-			}
-			i += written
+		if _, err := proxy.rawUDPConn.WriteFromTo(readBuf[:read], localAddr, clientAddr); err != nil {
+			log.Printf("reply loop (%s) stopped on write for reason: %v", ctKey.String(), err)
+			return
 		}
 	}
 }
