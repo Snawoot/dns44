@@ -15,8 +15,7 @@ GOIMPORTS := goimports
 src = $(wildcard *.go */*.go */*/*.go) go.mod go.sum
 
 native: bin-native
-all: bin-linux-amd64 bin-linux-386 bin-linux-arm bin-linux-arm64 \
-	bin-linux-mips bin-linux-mipsle bin-linux-mips64 bin-linux-mips64le
+all: bin-linux-amd64 bin-linux-386 bin-linux-arm bin-linux-arm64
 
 bin-native: $(OUTSUFFIX)
 bin-linux-amd64: $(OUTSUFFIX).linux-amd64
