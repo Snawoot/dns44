@@ -1,0 +1,14 @@
+network:
+    version: 2
+    ethernets:
+        lo:
+            match:
+                name: lo
+            addresses:
+              - 172.23.45.1/32
+            routes:
+              - to: 172.24.0.0/16
+                from: 127.0.0.1
+                table: 255
+                scope: host
+                type: local
