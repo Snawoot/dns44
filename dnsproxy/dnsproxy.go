@@ -71,16 +71,26 @@ func (d *DNSProxy) requestHandler(p *proxy.Proxy, ctx *proxy.DNSContext) (err er
 	} else {
 		clientKey = clientAddrPort.Addr().String()
 	}
-	log.Printf("DNS %s ?%s %s", clientAddrPort.String(), dns.TypeToString[qType], qName)
+	result := "???"
+	defer func() {
+		log.Printf("DNS %s ?%s %s => %s", clientAddrPort.String(), dns.TypeToString[qType], qName, result)
+	}()
 
 	if qType == dns.TypeA || qType == dns.TypeAAAA {
 		if err := d.rewrite(clientKey, qName, qType, ctx); err != nil {
 			return fmt.Errorf("rewrite error: %w", err)
 		}
+		result = logRRRepr(ctx.Res.Answer)
 		return nil
 	}
 
-	return p.Resolve(ctx)
+	err = p.Resolve(ctx)
+	if err != nil {
+		return err
+	}
+
+	result = logRRRepr(ctx.Res.Answer)
+	return nil
 }
 
 // rewrite rewrites the specified query and redirects the response to the
@@ -140,4 +150,18 @@ func createProxyConfig(cfg *Config) (proxyConfig proxy.Config, err error) {
 	proxyConfig.UpstreamConfig = upstreamCfg
 
 	return proxyConfig, nil
+}
+
+func logRRRepr(rrs []dns.RR) string {
+	var b strings.Builder
+	b.WriteString("[ ")
+	length := len(rrs)
+	for i, rr := range rrs {
+		b.WriteString(rr.String())
+		if i < length - 1 {
+			b.WriteString("; ")
+		}
+	}
+	b.WriteString(" ]")
+	return b.String()
 }
