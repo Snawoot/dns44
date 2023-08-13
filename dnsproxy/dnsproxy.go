@@ -62,10 +62,19 @@ func (d *DNSProxy) Close() (err error) {
 func (d *DNSProxy) requestHandler(p *proxy.Proxy, ctx *proxy.DNSContext) (err error) {
 	qName := ctx.Req.Question[0].Name
 	qType := ctx.Req.Question[0].Qtype
-	log.Printf("DNS ?%s %s", dns.TypeToString[qType], qName)
+
+	clientKey := "<bogus>"
+	clientAddrPort, err := netip.ParseAddrPort(ctx.Addr.String())
+	if err != nil {
+		log.Println("can't parse ctx.Addr %q: %v", ctx.Addr.String(), err)
+		clientAddrPort = netip.MustParseAddrPort("0.0.0.0:0")
+	} else {
+		clientKey = clientAddrPort.Addr().String()
+	}
+	log.Printf("DNS %s ?%s %s", clientAddrPort.String(), dns.TypeToString[qType], qName)
 
 	if qType == dns.TypeA || qType == dns.TypeAAAA {
-		if err := d.rewrite(qName, qType, ctx); err != nil {
+		if err := d.rewrite(clientKey, qName, qType, ctx); err != nil {
 			return fmt.Errorf("rewrite error: %w", err)
 		}
 		return nil
@@ -76,19 +85,12 @@ func (d *DNSProxy) requestHandler(p *proxy.Proxy, ctx *proxy.DNSContext) (err er
 
 // rewrite rewrites the specified query and redirects the response to the
 // configured IP addresses.
-func (d *DNSProxy) rewrite(qName string, qType uint16, ctx *proxy.DNSContext) error {
+func (d *DNSProxy) rewrite(clientKey string, qName string, qType uint16, ctx *proxy.DNSContext) error {
 	resp := &dns.Msg{}
 	resp.SetReply(ctx.Req)
 	resp.Compress = true
 
 	domainName := strings.TrimSuffix(strings.ToLower(qName), ".")
-	clientKey := "<bogus>"
-	clientAddrPort, err := netip.ParseAddrPort(ctx.Addr.String())
-	if err != nil {
-		log.Println("can't parse ctx.Addr %q: %v", ctx.Addr.String(), err)
-	} else {
-		clientKey = clientAddrPort.Addr().String()
-	}
 	answerAddress, err := d.mapper.EnsureMapping(clientKey, domainName, time.Duration(d.ttl+1)*time.Second)
 	if err != nil {
 		return fmt.Errorf("mapping error: %w", err)
