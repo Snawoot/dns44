@@ -106,13 +106,10 @@ func (proxy *UDPProxy) replyLoop(proxyConn net.Conn, clientAddr *net.UDPAddr, lo
 			log.Printf("reply loop (%s) stopped on read for reason: %v", ctKey.String(), err)
 			return
 		}
-		for i := 0; i != read; {
-			written, err := respConn.Write(readBuf[i:read])
-			if err != nil {
-				log.Printf("reply loop (%s) stopped on write for reason: %v", ctKey.String(), err)
-				return
-			}
-			i += written
+		_, err = respConn.Write(readBuf[:read])
+		if err != nil {
+			log.Printf("reply loop (%s) stopped on write for reason: %v", ctKey.String(), err)
+			return
 		}
 	}
 }
@@ -148,13 +145,9 @@ func (proxy *UDPProxy) listen() {
 			go proxy.replyLoop(proxyConn, from, to, ctKey)
 		}
 		proxy.connTrackLock.Unlock()
-		for i := 0; i != read; {
-			written, err := proxyConn.Write(readBuf[i:read])
-			if err != nil {
-				log.Printf("can't proxy a datagram to udp: %v", err)
-				break
-			}
-			i += written
+		_, err = proxyConn.Write(readBuf[:read])
+		if err != nil {
+			log.Printf("can't proxy a datagram to udp: %v", err)
 		}
 	}
 }
